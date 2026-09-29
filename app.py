@@ -140,8 +140,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Умное распределение групп + обучение")
-        self.geometry("1000x760")
-        self.minsize(900, 640)
+        self.geometry("900x760")
+        self.minsize(500, 300)
 
         config = app_config.load_config()
         for key in ("col_name", "col_group", "col_brand", "col_article", "groups_file"):

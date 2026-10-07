@@ -5,8 +5,10 @@ SmartMatcher — сопоставление названия запчасти ->
 1. Точное совпадение очищенного названия с подтверждённым (память "history") -> 100%.
 2. Пользовательские ПРАВИЛА (вкладка «Правила» в настройках): фраза/регулярка -> группа -> 100%.
 3. Скоринг по словам: слова названия группы (IDF, покрытие группы, «главное слово»,
-   запрос = название группы), согласование модификаторов (передний/задний, верхний/нижний,
-   наружный/внутренний) + бонус за ПОХОЖИЕ ПОДТВЕРЖДЁННЫЕ ПРИМЕРЫ из истории.
+   запрос = название группы), штраф за слова группы, которых нет в запросе,
+   согласование модификаторов (передний/задний, верхний/нижний, наружный/внутренний)
+   + вклад ИСТОРИИ: похожие подтверждённые примеры и доля групп среди примеров с тем же
+   главным словом (так матчер перенимает ваши привычки: «Болт …» -> Болты, винты).
    Явное совпадение с названием группы история не отменяет.
    Уверенность калибруется по отрыву лучшей группы от второй; 100% — только история и правила.
 История — единственный источник обучения; «learned» пересчитывается из неё.
@@ -24,7 +26,7 @@ class SmartMatcher:
     # Слова-модификаторы (стороны, размеры, цвета, служебные): низкий вес,
     # в память не учатся. Здесь именно результаты стемминга (_stem).
     MODIFIERS = {
-        "передн", "передня", "задн", "задня", "лев", "прав",
+        "передн", "передня", "передне", "задн", "задня", "задне", "лев", "прав",
         "верхн", "верхня", "нижн", "нижня", "наружн", "наруж",
         "внутренн", "внутрення", "боков", "центральн", "централь",
         "больш", "мал", "коротк", "длинн", "длин", "нов", "стар",
@@ -71,6 +73,8 @@ class SmartMatcher:
         (r'\bавторезин[а-я]*\b', 'шины '),
         (r'\bпокрышк[а-я]*\b', 'шины '),
         (r'\bиммобилиз[а-я]*\b', 'иммобилайзер '),
+        (r'\bблок[-\s]?фар[а-я]*\b', 'фара '),
+        (r'\bбуфер[а-я]*\b', 'отбойник '),
         (r'\bэлектропомп[а-я]*\b', 'помпа '),
     ]
 
@@ -121,11 +125,15 @@ class SmartMatcher:
     })
 
     THRESHOLD = 2.0
+    WEAK_HEADS = {"блок", "узел", "элемент", "деталь", "набор"}
+    HEAD_PRIOR_W = 8.0      # вклад доли группы среди примеров с тем же главным словом
+    HEAD_PRIOR_MIN = 4
+    PREC_PEN = 5.0          # штраф за слова группы, которых нет в запросе
     # Взаимоисключающие модификаторы: «задний» не должен давать «Передний бампер».
     EXCLUSIVE_PAIRS = [
-        ({"передн", "передня"}, {"задн", "задня"}),
-        ({"верхн", "верхня"}, {"нижн", "нижня"}),
-        ({"наружн", "наруж"}, {"внутренн", "внутрення"}),
+        ({"передн", "передня", "передне"}, {"задн", "задня", "задне"}),
+        ({"верхн", "верхня", "верхне"}, {"нижн", "нижня", "нижне"}),
+        ({"наружн", "наруж", "наружне"}, {"внутренн", "внутрення", "внутренне"}),
     ]
     MOD_CONFLICT_PENALTY = 15.0
     MOD_AGREE_BONUS = 2.0
@@ -135,6 +143,7 @@ class SmartMatcher:
     KNN_SECOND = 0.3       # вклад второго по сходству примера той же группы
     KNN_POWER = 2.0
     MOD_W_KNN = 0.3        # вес модификаторов (лев/прав/цвет...) при сравнении примеров
+    EX_MISS_PEN = 0.3      # штраф сходства за слова примера, которых нет в запросе
     MISS_PEN = 0.8         # штраф сходства, если в запросе есть значимое слово, которого нет ни в примере, ни в его группе
     HEAD_MISS = 0.7        # штраф сходства, если главное слово запроса не главное в примере
     EXACT_BONUS = 8.0      # запрос = название группы (без модификаторов)
@@ -150,7 +159,7 @@ class SmartMatcher:
 
     # Калибровка по отрыву от второй группы: при отрыве 0 уверенность <= CAL_MIN,
     # при отрыве >= CAL_GAP_FULL — до CAL_MAX. 100% для скоринга не выдаётся.
-    CAL_GAP_FULL = 2.0
+    CAL_GAP_FULL = 6.0
     CAL_MIN = 0.5
     CAL_MAX = 0.99
     GENERIC_OVERRIDE_CAP = 0.7
@@ -361,6 +370,7 @@ class SmartMatcher:
         self.history = dict(history)
         self._h_stems = {}
         self._h_head = {}
+        self._head_groups = defaultdict(lambda: defaultdict(int))
         self._h_inv = defaultdict(set)
         self._h_df = defaultdict(int)
         for k in self.history:
@@ -373,12 +383,24 @@ class SmartMatcher:
         self._h_stems[k] = st
         core = [w for w in lst if w not in self.MODIFIERS]
         self._h_head[k] = frozenset(core[:2]) if core else frozenset(lst[:1])
+        hw = self._first_head(lst)
+        if hw and k in self.history:
+            self._head_groups[hw][self.history[k]] += 1
         for w in st:
             self._h_inv[w].add(k)
             self._h_df[w] += 1
 
+    def _first_head(self, lst):
+        core = [w for w in lst if w not in self.MODIFIERS]
+        core2 = [w for w in core if w not in self.WEAK_HEADS]
+        return (core2 or core or [None])[0]
+
     def _unindex_key(self, k):
         st = self._h_stems.pop(k, frozenset())
+        if k in self.history:
+            hw = self._first_head(self._extract_stems_list(k))
+            if hw and self._head_groups[hw].get(self.history[k]):
+                self._head_groups[hw][self.history[k]] -= 1
         self._h_head.pop(k, None)
         for w in st:
             self._h_inv[w].discard(k)
@@ -444,6 +466,13 @@ class SmartMatcher:
                 miss_w = sum(self._word_weight(w) for w in qv if w not in known)
                 if tot_w > 0:
                     sim *= 1.0 - self.MISS_PEN * miss_w / tot_w
+            if self.EX_MISS_PEN:
+                ex_core = [w for w in hs if w not in self.MODIFIERS and w in self._vocab]
+                if ex_core:
+                    tot_e = sum(self._word_weight(w) for w in ex_core)
+                    miss_e = sum(self._word_weight(w) for w in ex_core if w not in stems)
+                    if tot_e > 0:
+                        sim *= 1.0 - self.EX_MISS_PEN * miss_e / tot_e
             per_group[g_ex].append(sim)
         out = {}
         for g, sims in per_group.items():
@@ -513,6 +542,10 @@ class SmartMatcher:
             return out(None, 0.0)
 
         head_word = next((w for w in stems_list if w not in self.MODIFIERS), stems_list[0])
+        if head_word in self.WEAK_HEADS:
+            alt = next((w for w in stems_list if w not in self.MODIFIERS and w not in self.WEAK_HEADS), None)
+            if alt:
+                head_word = alt
 
         # Опечатка в главном слове («Бампе» -> «бампер»). Кандидат должен
         # начинаться с той же буквы и мало отличаться по длине — иначе
@@ -531,6 +564,8 @@ class SmartMatcher:
         debug["head_word"] = head_word
 
         knn = self._knn_scores(stems, head_word)
+        hp = self._head_groups.get(head_word, {}) if self.HEAD_PRIOR_W else {}
+        hp_tot = sum(hp.values()) if hp else 0
         candidates = []  # (score, group, common, base, coverage, head_bonus, learned_bonus)
         for group, group_stems in self.group_stems.items():
             common = stems & group_stems
@@ -540,9 +575,16 @@ class SmartMatcher:
             coverage = len(common) / len(group_stems) if group_stems else 0
             head_bonus = self.HEAD_BONUS if head_word in group_stems else 0.0
             learned_bonus = knn.get(group, 0.0) * self.KNN_WEIGHT
+            if self.HEAD_PRIOR_W and hp_tot >= self.HEAD_PRIOR_MIN:
+                learned_bonus += self.HEAD_PRIOR_W * hp.get(group, 0) / hp_tot
             score = base + coverage * 2.5 + head_bonus + learned_bonus
             g_core = {w for w in group_stems if w not in self.MODIFIERS}
             mod_adj = self._modifier_adjust(stems, group_stems)
+            if self.PREC_PEN and group not in self.generic_groups and g_core:
+                tot_g = sum(self._word_weight(w) for w in g_core)
+                miss_g = sum(self._word_weight(w) for w in g_core if w not in stems)
+                if tot_g > 0:
+                    score -= self.PREC_PEN * miss_g / tot_g
             score += mod_adj
             if self._group_head.get(group) == head_word:
                 score += self.GROUP_HEAD_BONUS
@@ -552,6 +594,12 @@ class SmartMatcher:
             elif coverage >= 1.0 and len(g_core) >= 2:
                 score += self.FULLCOVER_BONUS
             candidates.append((score, group, common, base, coverage, head_bonus, learned_bonus))
+        if self.HEAD_PRIOR_W and hp_tot >= self.HEAD_PRIOR_MIN:
+            seen_h = {c[1] for c in candidates}
+            for group, n_ in hp.items():
+                if n_ > 0 and group not in seen_h and group in self.group_stems and group not in knn:
+                    lb = self.HEAD_PRIOR_W * n_ / hp_tot
+                    candidates.append((lb, group, set(), 0.0, 0.0, 0.0, lb))
         # группы, найденные только по примерам из истории (нет общих слов с названием группы)
         seen = {c[1] for c in candidates}
         for group, kv in knn.items():

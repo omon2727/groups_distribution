@@ -7,6 +7,8 @@ import re
 from datetime import datetime
 from urllib.parse import quote
 import json
+import sys
+import ctypes
 
 from matcher import SmartMatcher
 from settings_window import SettingsWindow
@@ -14,6 +16,15 @@ import app_config
 
 
 # ====================== ПРИЛОЖЕНИЕ ======================
+def _set_windows_app_user_model_id():
+    """До создания окна. Иначе панель задач показывает иконку python.exe, а не logo.ico."""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Remzona.AutoGroups")
+    except Exception:
+        pass
+
 class App(tk.Tk):
     HELP_TEXT = (
         "РАБОТА С ТАБЛИЦЕЙ\n\n"
@@ -138,10 +149,14 @@ class App(tk.Tk):
         return "break"
 
     def __init__(self):
+        _set_windows_app_user_model_id()
         super().__init__()
-        self.title("Умное распределение групп + обучение")
+        self.title("Автораспределение групп Remzona")
         self.geometry("900x760")
         self.minsize(500, 300)
+        self._col_fit_busy = False
+        self._col_fit_width = None
+        self._set_window_icon()
 
         config = app_config.load_config()
         for key in ("col_name", "col_group", "col_brand", "col_article", "groups_file"):
@@ -188,6 +203,8 @@ class App(tk.Tk):
         self.setup_universal_clipboard()
         self.try_load_default_groups()
         self.schedule_autosave()
+        self.after_idle(self._fit_columns)
+        self.after_idle(self._set_window_icon)
 
 
     # ====================== НАСТРОЙКИ ======================
@@ -252,6 +269,26 @@ class App(tk.Tk):
             self.matcher = self._make_matcher()
         return self.matcher
 
+    def _set_window_icon(self):
+        """logo.ico в заголовке окна и в панели задач. Файл лежит рядом с app.py."""
+        candidates = [Path.cwd() / "logo.ico"]
+        try:
+            candidates.insert(0, Path(__file__).resolve().parent / "logo.ico")
+        except NameError:
+            pass
+        icon = next((p for p in candidates if p.is_file()), None)
+        if icon is None:
+            return
+        path = icon.resolve().as_posix()
+        try:
+            self.iconbitmap(default=path)
+        except tk.TclError:
+            pass
+        try:
+            self.iconbitmap(path)
+        except tk.TclError:
+            return
+
     def create_widgets(self):
         top = ttk.Frame(self, padding=8)
         top.pack(fill="x")
@@ -310,23 +347,30 @@ class App(tk.Tk):
         self.tree.heading("google", text="Google")
         self.tree.heading("remzona", text="Remzona")
 
-        self.tree.column("idx", width=45, anchor="center")
-        self.tree.column("name", width=340)
-        self.tree.column("suggested", width=170)
-        self.tree.column("alt", width=260)
-        self.tree.column("final", width=170)
-        self.tree.column("google", width=70, anchor="center")
-        self.tree.column("remzona", width=75, anchor="center")
+        self._column_specs = (
+            {"id": "idx", "base": 45, "min": 42, "anchor": "center"},
+            {"id": "name", "base": 340, "min": 140, "anchor": "w"},
+            {"id": "suggested", "base": 170, "min": 100, "anchor": "w"},
+            {"id": "alt", "base": 260, "min": 130, "anchor": "w"},
+            {"id": "final", "base": 170, "min": 120, "anchor": "w"},
+            {"id": "google", "base": 86, "min": 78, "anchor": "center"},
+            {"id": "remzona", "base": 96, "min": 86, "anchor": "center"},
+        )
+        for spec in self._column_specs:
+            self.tree.column(
+                spec["id"], width=spec["base"], minwidth=spec["min"],
+                anchor=spec["anchor"], stretch=False,
+            )
 
         vsb = ttk.Scrollbar(frm_table, orient="vertical", command=self.tree.yview)
-        hsb = ttk.Scrollbar(frm_table, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.tree.configure(yscrollcommand=vsb.set)
 
         self.tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
         frm_table.grid_rowconfigure(0, weight=1)
         frm_table.grid_columnconfigure(0, weight=1)
+
+        self.tree.bind("<Configure>", self._fit_columns)
 
         self.tree.bind("<Double-1>", self.on_double_click)
         self.tree.bind("<Button-1>", self.on_tree_click)
@@ -361,6 +405,59 @@ class App(tk.Tk):
         ttk.Button(frm_filter, text="Только с предложением", command=lambda: self.fill_tree("suggested")).pack(side="left", padx=2)
         ttk.Button(frm_filter, text="Только без группы", command=lambda: self.fill_tree("empty")).pack(side="left", padx=2)
         ttk.Button(frm_filter, text="Низкая уверенность", command=lambda: self.fill_tree("low")).pack(side="left", padx=2)
+
+
+    def _fit_columns(self, event=None):
+        """Подгоняет столбцы под ширину таблицы, пропорции те же."""
+        specs = getattr(self, "_column_specs", None)
+        tree = getattr(self, "tree", None)
+        if not specs or tree is None or self._col_fit_busy:
+            return
+        if event is not None and event.widget is not tree:
+            return
+        raw = tree.winfo_width() if event is None else event.width
+        if raw < 80 or raw == self._col_fit_width:
+            return
+        avail = raw - 4
+
+        base_sum = sum(s["base"] for s in specs)
+        widths = [max(s["min"], int(s["base"] * avail / base_sum)) for s in specs]
+        overflow = sum(widths) - avail
+        guard = 0
+        while overflow > 0 and guard < 8:
+            guard += 1
+            room = [max(0, widths[i] - specs[i]["min"]) for i in range(len(specs))]
+            pool = sum(room)
+            if pool <= 0:
+                break
+            progressed = False
+            for i in range(len(specs)):
+                if room[i] <= 0 or overflow <= 0:
+                    continue
+                cut = min(room[i], overflow, max(1, int(round(overflow * room[i] / pool))))
+                widths[i] -= cut
+                overflow -= cut
+                progressed = True
+            if not progressed:
+                break
+        leftover = avail - sum(widths)
+        name_i = next(i for i, s in enumerate(specs) if s["id"] == "name")
+        if leftover > 0:
+            widths[name_i] += leftover
+
+        self._col_fit_busy = True
+        self._col_fit_width = raw
+        try:
+            for spec, width in zip(specs, widths):
+                tree.column(
+                    spec["id"],
+                    width=width,
+                    minwidth=min(spec["min"], width),
+                    anchor=spec["anchor"],
+                    stretch=False,
+                )
+        finally:
+            self._col_fit_busy = False
 
     def browse_excel(self):
         path = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls")])

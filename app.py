@@ -270,24 +270,54 @@ class App(tk.Tk):
         return self.matcher
 
     def _set_window_icon(self):
-        """logo.ico в заголовке окна и в панели задач. Файл лежит рядом с app.py."""
-        candidates = [Path.cwd() / "logo.ico"]
+        """Иконка в заголовке окна и в панели задач.
+        В собранном exe (PyInstaller) logo.ico не лежит рядом с программой: он вшит в exe как
+        иконка файла, а во время работы Tk показывает своё «перо». Поэтому:
+        1) ищем logo.ico в папке распаковки (_MEIPASS), рядом с exe, рядом с app.py, в cwd;
+        2) если не нашли — берём иконку прямо из самого exe через WinAPI."""
+        candidates = []
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "logo.ico")
+        if getattr(sys, "frozen", False):
+            candidates.append(Path(sys.executable).resolve().parent / "logo.ico")
         try:
-            candidates.insert(0, Path(__file__).resolve().parent / "logo.ico")
+            candidates.append(Path(__file__).resolve().parent / "logo.ico")
         except NameError:
             pass
+        candidates.append(Path.cwd() / "logo.ico")
         icon = next((p for p in candidates if p.is_file()), None)
-        if icon is None:
+        if icon is not None:
+            path = icon.resolve().as_posix()
+            try:
+                self.iconbitmap(default=path)
+                self.iconbitmap(path)
+                return
+            except tk.TclError:
+                pass
+        self._set_icon_from_exe()
+
+    def _set_icon_from_exe(self):
+        """Запасной вариант для Windows: иконка из ресурсов самого exe (той, что видна у файла)."""
+        if sys.platform != "win32" or not getattr(sys, "frozen", False):
             return
-        path = icon.resolve().as_posix()
         try:
-            self.iconbitmap(default=path)
-        except tk.TclError:
+            from ctypes import wintypes
+            large = wintypes.HICON()
+            small = wintypes.HICON()
+            n = ctypes.windll.shell32.ExtractIconExW(
+                sys.executable, 0, ctypes.byref(large), ctypes.byref(small), 1)
+            if n <= 0:
+                return
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id()) or self.winfo_id()
+            WM_SETICON, ICON_SMALL, ICON_BIG = 0x0080, 0, 1
+            if small.value:
+                ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
+            if large.value:
+                ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, large)
+        except Exception:
             pass
-        try:
-            self.iconbitmap(path)
-        except tk.TclError:
-            return
 
     def create_widgets(self):
         top = ttk.Frame(self, padding=8)
@@ -347,14 +377,17 @@ class App(tk.Tk):
         self.tree.heading("google", text="Google")
         self.tree.heading("remzona", text="Remzona")
 
+        # Все столбцы масштабируются вместе с окном: свободная ширина делится пропорционально
+        # "base" (поэтому главные столбцы — название, предложение, альтернативы — шире всех,
+        # а №, Google и Remzona минимальные), но не меньше "min".
         self._column_specs = (
-            {"id": "idx", "base": 45, "min": 42, "anchor": "center"},
-            {"id": "name", "base": 340, "min": 140, "anchor": "w"},
-            {"id": "suggested", "base": 170, "min": 100, "anchor": "w"},
-            {"id": "alt", "base": 260, "min": 130, "anchor": "w"},
-            {"id": "final", "base": 170, "min": 120, "anchor": "w"},
-            {"id": "google", "base": 86, "min": 78, "anchor": "center"},
-            {"id": "remzona", "base": 96, "min": 86, "anchor": "center"},
+            {"id": "idx", "base": 40, "min": 20, "anchor": "center"},
+            {"id": "name", "base": 360, "min": 80, "anchor": "w"},
+            {"id": "suggested", "base": 230, "min": 60, "anchor": "w"},
+            {"id": "alt", "base": 300, "min": 70, "anchor": "w"},
+            {"id": "final", "base": 150, "min": 50, "anchor": "w"},
+            {"id": "google", "base": 40, "min": 20, "anchor": "center"},
+            {"id": "remzona", "base": 40, "min": 20, "anchor": "center"},
         )
         for spec in self._column_specs:
             self.tree.column(
@@ -408,7 +441,8 @@ class App(tk.Tk):
 
 
     def _fit_columns(self, event=None):
-        """Подгоняет столбцы под ширину таблицы, пропорции те же."""
+        """Раскладывает ширину таблицы по столбцам пропорционально их базовой ширине.
+        Все столбцы сжимаются и растягиваются вместе с окном; ниже "min" не опускаются."""
         specs = getattr(self, "_column_specs", None)
         tree = getattr(self, "tree", None)
         if not specs or tree is None or self._col_fit_busy:
@@ -420,35 +454,34 @@ class App(tk.Tk):
             return
         avail = raw - 4
 
-        base_sum = sum(s["base"] for s in specs)
-        widths = [max(s["min"], int(s["base"] * avail / base_sum)) for s in specs]
-        overflow = sum(widths) - avail
-        guard = 0
-        while overflow > 0 and guard < 8:
-            guard += 1
-            room = [max(0, widths[i] - specs[i]["min"]) for i in range(len(specs))]
-            pool = sum(room)
-            if pool <= 0:
+        # Пропорциональное деление с учётом минимумов: столбцы, которым по доле досталось
+        # меньше минимума, фиксируются на минимуме, остаток делится между остальными.
+        widths = {}
+        pending = list(specs)
+        free = avail
+        while pending:
+            total = sum(s["base"] for s in pending)
+            clamped = [s for s in pending if free * s["base"] / total < s["min"]]
+            if not clamped:
                 break
-            progressed = False
-            for i in range(len(specs)):
-                if room[i] <= 0 or overflow <= 0:
-                    continue
-                cut = min(room[i], overflow, max(1, int(round(overflow * room[i] / pool))))
-                widths[i] -= cut
-                overflow -= cut
-                progressed = True
-            if not progressed:
-                break
-        leftover = avail - sum(widths)
-        name_i = next(i for i, s in enumerate(specs) if s["id"] == "name")
-        if leftover > 0:
-            widths[name_i] += leftover
+            for s in clamped:
+                widths[s["id"]] = s["min"]
+                free -= s["min"]
+                pending.remove(s)
+        if pending:
+            total = sum(s["base"] for s in pending)
+            used = 0
+            for s in pending[:-1]:
+                w = int(free * s["base"] / total)
+                widths[s["id"]] = w
+                used += w
+            widths[pending[-1]["id"]] = max(pending[-1]["min"], free - used)
 
         self._col_fit_busy = True
         self._col_fit_width = raw
         try:
-            for spec, width in zip(specs, widths):
+            for spec in specs:
+                width = int(widths[spec["id"]])
                 tree.column(
                     spec["id"],
                     width=width,

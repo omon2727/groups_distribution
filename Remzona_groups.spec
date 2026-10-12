@@ -5,7 +5,7 @@ a = Analysis(
     ['fill_groups_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('groups.txt', '.')],
+    datas=[('logo.ico', '.'), ('groups.txt', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['logo.ico'],
+    icon=['logo.ico','logo.ico'],
 )

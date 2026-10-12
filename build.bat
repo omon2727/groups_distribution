@@ -48,6 +48,8 @@ python -m PyInstaller ^
     --clean ^
     --onefile ^
     --windowed ^
+    --icon=logo.ico ^
+    --add-data "logo.ico;."  ^
     --name=Remzona_groups ^
     %ICON_ARG% ^
     --add-data "groups.txt;." ^

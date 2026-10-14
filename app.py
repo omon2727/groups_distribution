@@ -67,7 +67,12 @@ class App(tk.Tk):
 
     # Ctrl+буква определяется по event.keycode (виртуальный код физической клавиши на
     # Windows), поэтому работает одинаково в EN и RU раскладках.
-    CTRL_VK_CODES = {"c": 67, "v": 86, "x": 88, "z": 90, "d": 68, "a": 65}
+    # Максимальная длина названия группы в столбце «Альтернативы» (длиннее — «…»).
+    # Полный текст виден во всплывающей подсказке и при копировании ячейки.
+    ALT_NAME_MAX = 14
+
+    CTRL_VK_CODES = {"c": 67, "v": 86, "x": 88, "z": 90, "d": 68, "a": 65,
+                     "backspace": 8, "delete": 46}
 
     def _make_ctrl_dispatcher(self, mapping: dict):
         code_map = {self.CTRL_VK_CODES[letter]: fn for letter, fn in mapping.items()}
@@ -134,13 +139,54 @@ class App(tk.Tk):
             pass
         return "break"
 
+    def _entry_delete_word_back(self, event):
+        """Ctrl+Backspace: удалить слово слева от курсора (или выделенный фрагмент)."""
+        widget = event.widget
+        try:
+            if widget.selection_present():
+                widget.delete("sel.first", "sel.last")
+                return "break"
+            pos = widget.index("insert")
+            before = widget.get()[:pos]
+            m = re.search(r"(\w+|[^\w\s]+)\s*$|\s+$", before)
+            start = m.start() if m else 0
+            if start < pos:
+                widget.delete(start, pos)
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _entry_delete_word_forward(self, event):
+        """Ctrl+Delete: удалить слово справа от курсора (или выделенный фрагмент)."""
+        widget = event.widget
+        try:
+            if widget.selection_present():
+                widget.delete("sel.first", "sel.last")
+                return "break"
+            pos = widget.index("insert")
+            after = widget.get()[pos:]
+            m = re.match(r"\s*(\w+|[^\w\s]+)?\s*", after)
+            end = pos + (m.end() if m else 0)
+            if end > pos:
+                widget.delete(pos, end)
+        except tk.TclError:
+            pass
+        return "break"
+
     def setup_universal_clipboard(self):
         entry_dispatch = self._make_ctrl_dispatcher({
             "c": self._entry_copy, "v": self._entry_paste, "x": self._entry_cut,
             "a": self._entry_select_all,
+            "backspace": self._entry_delete_word_back,
+            "delete": self._entry_delete_word_forward,
         })
         for widget_class in ("TEntry", "Entry"):
             self.bind_class(widget_class, "<Control-Key>", entry_dispatch)
+            # Ctrl+Backspace / Ctrl+Delete привязываем отдельно и явно: у Tk есть своя, более
+            # специфичная привязка <Key-BackSpace>, она перебивала общий <Control-Key>
+            # и удаляла только один символ.
+            self.bind_class(widget_class, "<Control-BackSpace>", self._entry_delete_word_back)
+            self.bind_class(widget_class, "<Control-Delete>", self._entry_delete_word_forward)
 
     def select_all_rows(self, event=None):
         children = self.tree.get_children()
@@ -152,8 +198,13 @@ class App(tk.Tk):
         _set_windows_app_user_model_id()
         super().__init__()
         self.title("Автораспределение групп Remzona")
-        self.geometry("900x760")
+        # Не больше экрана (на небольших мониторах 900x760 не помещается с панелью задач).
+        win_w = min(900, max(500, self.winfo_screenwidth() - 40))
+        win_h = min(760, max(300, self.winfo_screenheight() - 100))
+        self.geometry(f"{win_w}x{win_h}")
         self.minsize(500, 300)
+        self._sep_drag = False
+        self._drag_col = None
         self._col_fit_busy = False
         self._col_fit_width = None
         self._set_window_icon()
@@ -185,6 +236,7 @@ class App(tk.Tk):
         self.last_click = {"item": None, "column": "#5"}
         self.undo_stack = []
         self._assign_counter = {}
+        self._alt_full = {}
 
         self.settings_window = None
 
@@ -381,13 +433,13 @@ class App(tk.Tk):
         # "base" (поэтому главные столбцы — название, предложение, альтернативы — шире всех,
         # а №, Google и Remzona минимальные), но не меньше "min".
         self._column_specs = (
-            {"id": "idx", "base": 40, "min": 20, "anchor": "center"},
-            {"id": "name", "base": 360, "min": 80, "anchor": "w"},
+            {"id": "idx", "base": 30, "min": 20, "anchor": "center"},
+            {"id": "name", "base": 340, "min": 80, "anchor": "w"},
             {"id": "suggested", "base": 230, "min": 60, "anchor": "w"},
-            {"id": "alt", "base": 300, "min": 70, "anchor": "w"},
-            {"id": "final", "base": 150, "min": 50, "anchor": "w"},
-            {"id": "google", "base": 40, "min": 20, "anchor": "center"},
-            {"id": "remzona", "base": 40, "min": 20, "anchor": "center"},
+            {"id": "alt", "base": 340, "min": 70, "anchor": "w"},
+            {"id": "final", "base": 230, "min": 50, "anchor": "w"},
+            {"id": "google", "base": 30, "min": 20, "anchor": "center"},
+            {"id": "remzona", "base": 30, "min": 20, "anchor": "center"},
         )
         for spec in self._column_specs:
             self.tree.column(
@@ -404,9 +456,15 @@ class App(tk.Tk):
         frm_table.grid_columnconfigure(0, weight=1)
 
         self.tree.bind("<Configure>", self._fit_columns)
+        # Ручное растягивание границ столбцов: после отпускания мыши раскладка
+        # нормализуется, чтобы столбцы не выходили за край таблицы.
+        self.tree.bind("<B1-Motion>", self._on_tree_drag, add="+")
+        self.tree.bind("<ButtonRelease-1>", self._on_tree_release, add="+")
 
         self.tree.bind("<Double-1>", self.on_double_click)
         self.tree.bind("<Button-1>", self.on_tree_click)
+        # ВАЖНО: с add="+", иначе привязка <Button-1> выше затёрла бы эту.
+        self.tree.bind("<Button-1>", self._on_tree_press, add="+")
         self.tree.bind("<Button-3>", self.show_context_menu)
         self.tree.bind("<Motion>", self._on_tree_motion)
         self.tree.bind("<Leave>", self._hide_cell_tooltip)
@@ -440,9 +498,71 @@ class App(tk.Tk):
         ttk.Button(frm_filter, text="Низкая уверенность", command=lambda: self.fill_tree("low")).pack(side="left", padx=2)
 
 
-    def _fit_columns(self, event=None):
+    def _on_tree_press(self, event):
+        self._sep_drag = self.tree.identify_region(event.x, event.y) == "separator"
+        self._drag_col = None
+        if self._sep_drag:
+            # Какой столбец тянут: тот, чей правый край ближе всего к указателю.
+            edge, best = 0, None
+            for i, spec in enumerate(self._column_specs):
+                edge += int(self.tree.column(spec["id"], "width"))
+                dist = abs(edge - event.x)
+                if best is None or dist < best[0]:
+                    best = (dist, i)
+            self._drag_col = best[1] if best else None
+
+    def _on_tree_drag(self, event):
+        """Во время перетаскивания границы: если таблица стала шире окна, столбцы справа
+        от тянущегося сжимаются (не ниже минимума), а не уезжают за край."""
+        if not self._sep_drag or self._drag_col is None:
+            return
+        self.after_idle(self._rebalance_after_drag)
+
+    def _rebalance_after_drag(self):
+        specs = self._column_specs
+        tree = self.tree
+        try:
+            avail = tree.winfo_width() - 4
+            widths = [int(tree.column(s["id"], "width")) for s in specs]
+        except tk.TclError:
+            return
+        overflow = sum(widths) - avail
+        if overflow <= 0:
+            return
+        k = self._drag_col
+        # 1) сжимаем столбцы справа пропорционально их запасу над минимумом
+        for _ in range(6):
+            room = [max(0, widths[i] - specs[i]["min"]) for i in range(k + 1, len(specs))]
+            pool = sum(room)
+            if overflow <= 0 or pool <= 0:
+                break
+            for j, r in enumerate(room):
+                if r <= 0 or overflow <= 0:
+                    continue
+                cut = min(r, overflow, max(1, round(overflow * r / pool)))
+                widths[k + 1 + j] -= cut
+                overflow -= cut
+        # 2) если справа сжимать уже некуда — ограничиваем сам тянущийся столбец
+        if overflow > 0:
+            widths[k] = max(specs[k]["min"], widths[k] - overflow)
+        for spec, w in zip(specs, widths):
+            tree.column(spec["id"], width=int(w), minwidth=min(spec["min"], int(w)))
+
+    def _on_tree_release(self, event):
+        """Пользователь потянул границу столбца: запоминаем его ширины как новые пропорции
+        и тут же вписываем все столбцы в видимую ширину таблицы."""
+        if not self._sep_drag:
+            return
+        self._sep_drag = False
+        self._drag_col = None
+        for spec in self._column_specs:
+            spec["base"] = max(spec["min"], int(self.tree.column(spec["id"], "width")))
+        self.after_idle(lambda: self._fit_columns(force=True))
+
+    def _fit_columns(self, event=None, force=False):
         """Раскладывает ширину таблицы по столбцам пропорционально их базовой ширине.
-        Все столбцы сжимаются и растягиваются вместе с окном; ниже "min" не опускаются."""
+        Все столбцы сжимаются и растягиваются вместе с окном; ниже "min" не опускаются.
+        Сумма ширин всегда равна ширине таблицы, поэтому столбцы не уходят за её край."""
         specs = getattr(self, "_column_specs", None)
         tree = getattr(self, "tree", None)
         if not specs or tree is None or self._col_fit_busy:
@@ -450,7 +570,7 @@ class App(tk.Tk):
         if event is not None and event.widget is not tree:
             return
         raw = tree.winfo_width() if event is None else event.width
-        if raw < 80 or raw == self._col_fit_width:
+        if raw < 80 or (raw == self._col_fit_width and not force):
             return
         avail = raw - 4
 
@@ -641,6 +761,11 @@ class App(tk.Tk):
         elif column == "#7":
             webbrowser.open(f"https://www.google.com/search?q={quote('remzona ' + full_name)}")
 
+    def _short_alt_name(self, group: str) -> str:
+        """Сокращённое название группы для столбца «Альтернативы»."""
+        limit = self.ALT_NAME_MAX
+        return group if len(group) <= limit else group[:limit - 1].rstrip() + "…"
+
     def fill_tree(self, filter_mode="all"):
         self.tree.delete(*self.tree.get_children())
         if self.df is None:
@@ -656,8 +781,10 @@ class App(tk.Tk):
             conf = row.get("_confidence", 0)
 
             top = self.top_matches.get(idx, [])
-            alt_parts = [f"{g} ({c*100:.0f}%)" for g, c in top[1:3] if g]
-            alt_text = "  |  ".join(alt_parts)
+            alt_full = "  |  ".join(f"{g} ({c*100:.0f}%)" for g, c in top[1:3] if g)
+            self._alt_full[str(idx)] = alt_full
+            alt_text = " | ".join(
+                f"{self._short_alt_name(g)} {c*100:.0f}%" for g, c in top[1:3] if g)
 
             show = (filter_mode == "all" or
                     (filter_mode == "suggested" and suggested) or
@@ -783,6 +910,8 @@ class App(tk.Tk):
         x = (popup.winfo_screenwidth() // 2) - (w // 2)
         y = (popup.winfo_screenheight() // 2) - (h // 2)
         popup.geometry(f"{w}x{h}+{x}+{y}")
+
+        popup.bind("<Escape>", lambda e: popup.destroy())
 
         popup.deiconify()
         popup.grab_set()
@@ -1046,7 +1175,7 @@ class App(tk.Tk):
         elif column == "#3":
             return self.tree.set(item, "suggested")
         elif column == "#4":
-            return self.tree.set(item, "alt")
+            return self._alt_full.get(str(item)) or self.tree.set(item, "alt")
         elif column == "#5":
             return self.tree.set(item, "final")
         elif column in ("#6", "#7"):

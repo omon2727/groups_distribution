@@ -23,8 +23,6 @@
   <ItemGroup>
     <Compile Include="app.py" />
     <Compile Include="app_config.py" />
-    <Compile Include="audit_memory.py" />
-    <Compile Include="check_data.py" />
     <Compile Include="check_matcher_loo.py" />
     <Compile Include="fill_groups_gui.py" />
     <Compile Include="matcher.py" />

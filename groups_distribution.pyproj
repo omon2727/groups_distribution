@@ -26,6 +26,7 @@
     <Compile Include="check_matcher_loo.py" />
     <Compile Include="fill_groups_gui.py" />
     <Compile Include="matcher.py" />
+    <Compile Include="matcher_data.py" />
     <Compile Include="settings_window.py" />
   </ItemGroup>
   <ItemGroup>

@@ -166,8 +166,15 @@ class SmartMatcher:
         s = name.lower()
         s = self._fix_homoglyphs(s)
         s = s.replace('_', ' ')
-        for pattern, repl in self.ABBREV:
-            s = re.sub(pattern, repl, s)
+        # Паттерны компилируются один раз: правил больше 512, а кэш re.sub держит только 512,
+        # из-за чего каждый вызов перекомпилировал бы их заново (очень медленно).
+        comp = self.__dict__.get('_abbrev_c')
+        if comp is None or self.__dict__.get('_abbrev_src') is not self.ABBREV:
+            comp = [(re.compile(pat), rep) for pat, rep in self.ABBREV]
+            self._abbrev_c = comp
+            self._abbrev_src = self.ABBREV
+        for rx, repl in comp:
+            s = rx.sub(repl, s)
         # типоразмер шины (175/65 R14, 205/55/16): главное слово — «шины»
         if self.TIRE_SIZE_RE.search(s) and not re.search(r'\bшин', s):
             s = 'шины ' + s

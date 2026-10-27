@@ -8,6 +8,7 @@ from datetime import datetime
 from urllib.parse import quote
 import json
 import sys
+import time
 import ctypes
 
 from matcher import SmartMatcher
@@ -28,63 +29,41 @@ def _set_windows_app_user_model_id():
 class App(tk.Tk):
     HELP_TEXT = (
         "РАБОТА С ТАБЛИЦЕЙ\n\n"
-        "• Двойной клик по «Альтернативы» — быстрый выбор одной из топ-3 групп кнопками "
-        "(или «Другой вариант…» для поиска по всем группам). Esc закрывает окно.\n"
-        "• Двойной клик по «Итоговая группа» — полный поиск по всем группам (набирайте часть "
-        "названия, стрелкой вниз и Enter выбирайте вариант). Esc закрывает окно.\n"
-        "• В столбце «Альтернативы» названия сокращены, чтобы были видны все варианты. "
-        "Наведите курсор на ячейку и подождите — появится подсказка с полным текстом.\n"
-        "• Клик по «Google» — поиск по бренду и артикулу, клик по «Remzona» — поиск названия на Remzona.\n"
-        "• Столбцы всегда помещаются в окно: если потянуть границу столбца, остальные сжимаются, "
-        "а не уезжают за экран.\n\n"
-        "ФИЛЬТРЫ\n\n"
-        "• «Показать все», «Только с предложением», «Только без группы», «Низкая уверенность» "
-        "(уверенность ниже 0,55 — такие подсказки проверяйте в первую очередь).\n\n"
+        "• Двойной клик по «Альтернативы» — быстрый выбор одной из топ-3 предложенных групп кнопками.\n"
+        "• Двойной клик по «Итоговая группа» — полный поиск по всем группам (набирайте название, "
+        "стрелками/Enter выбирайте вариант).\n"
+        "• Наведите курсор на любую ячейку и подождите — появится всплывающая подсказка с полным "
+        "текстом, если значение не помещается в столбец.\n\n"
         "ВЫДЕЛЕНИЕ НЕСКОЛЬКИХ СТРОК\n\n"
         "• Ctrl+клик / Shift+клик — выделить несколько строк.\n"
         "• Ctrl+A — выделить все видимые строки.\n"
         "• ПКМ по выделенным строкам → «Назначить группу выделенным строкам…» — один выбор группы "
         "сразу для всех.\n"
         "• Ctrl+D (или ПКМ → «Протянуть группу вниз») — скопировать группу из первой выделенной "
-        "строки на остальные выделенные, как протягивание уголка ячейки в Excel. Протянутые строки "
-        "запоминаются, поэтому протягивайте только проверенные.\n"
+        "строки на остальные выделенные, как протягивание уголка ячейки в Excel.\n"
         "• ПКМ → «Назначить эту группу всем строкам с таким же названием» — группа из первой "
         "выделенной строки проставляется ВСЕМ строкам таблицы с тем же очищенным названием "
         "(например, 25 одинаковых «Сальник!»), в том числе скрытым фильтром.\n\n"
         "ПРАВИЛА\n\n"
         "• Настройки → вкладка «Правила»: «фраза → группа» (или регулярка → группа). Правило "
-        "срабатывает раньше подбора и даёт 100% уверенность. Порядок решения: точное совпадение "
-        "из памяти → правила сверху вниз → подбор по смыслу.\n"
-        "• Точная запись в памяти сильнее правила: чтобы поправить её, назначьте верную группу заново.\n"
+        "срабатывает до скоринга и даёт 100% уверенность. Порядок решения: точное совпадение из "
+        "памяти → правила сверху вниз → скоринг.\n"
         "• ПКМ → «Создать правило из строки…» — быстро сделать правило из названия и итоговой "
         "группы выделенной строки (фразу можно отредактировать, например укоротить).\n"
-        "• Не делайте слишком общих правил (например, «ремкомплект»): они сработают на всё подряд. "
-        "Проверяйте правило кнопкой «Проверить название».\n\n"
+        "• В логе сопоставления столбец «Источник» показывает history / rule / scoring / none.\n\n"
         "УВЕРЕННОСТЬ\n\n"
-        "• 100% выдаётся только для памяти и правил.\n"
-        "• Для остальных строк уверенность показывает надёжность подсказки: от 0,95 можно принимать "
-        "после беглого взгляда, 0,85–0,95 — просматривать, ниже 0,85 — проверять, ниже 0,55 — решать "
-        "самостоятельно. Если две группы почти равны, уверенность занижается.\n\n"
+        "Для скоринга уверенность калибруется по отрыву лучшей группы от второй: если конкуренты "
+        "почти равны, уверенность занижается, и строка попадает в фильтр «Низкая уверенность». "
+        "100% выдаётся только для истории и правил.\n\n"
         "ГОРЯЧИЕ КЛАВИШИ (работают в любой раскладке — EN и RU)\n\n"
         "• Ctrl+C — копировать содержимое ячейки (той колонки, по которой был последний клик).\n"
         "• Ctrl+V / Ctrl+X — вставить / вырезать текст в полях ввода.\n"
         "• Ctrl+A — выделить всё (в полях ввода — весь текст, в таблице — все строки).\n"
-        "• Ctrl+Backspace / Ctrl+Delete — удалить слово целиком назад / вперёд в полях ввода.\n"
-        "• Ctrl+D — протянуть группу вниз.\n"
-        "• Esc — закрыть окно выбора группы.\n"
-        "• Ctrl+Z — отменить последнее назначение группы (память при этом не откатывается: "
-        "если назначили не ту группу, назначьте правильную заново).\n\n"
-        "ОБУЧЕНИЕ И ЛОГ\n\n"
-        "• Каждое ручное назначение группы запоминается: и точная фраза, и отдельные слова вместе с "
-        "группой, к которой их отнесли. Непроверенные предложения в память не попадают.\n"
-        "• Кнопка «3. Сохранить лог сопоставления» — подробный лог с предложением, уверенностью, "
-        "альтернативами, источником решения (history / rule / scoring / none) и вашей итоговой группой. "
-        "Сохраняйте его после ручной проверки: по расхождениям видно, где алгоритм ошибся, и по нему "
-        "можно донастроить подбор.\n"
-        "• Настройки → «Обучить по файлу исправлений…» — загрузить лог или Excel «Название — Группа». "
-        "Для лога лучше отвечать «Да»: запомнятся только исправленные строки.\n"
-        "• Автосохранение копирует лог и память в папку remzona_groups_logs (до 10 файлов каждого вида). "
-        "Предыдущая версия памяти хранится в matching_memory.json.bak.\n"
+        "• Ctrl+Z — отменить последнее назначение группы (для памяти матчера отмена не действует — "
+        "уже выученные слова придётся переучить, назначив группу заново).\n\n"
+        "ОБУЧЕНИЕ\n\n"
+        "Каждое ручное назначение группы запоминается: и точная фраза, и отдельные слова вместе с "
+        "группой, к которой их отнесли. Со временем подсказки становятся точнее без изменения кода."
     )
 
     # Ctrl+буква определяется по event.keycode (виртуальный код физической клавиши на
@@ -255,6 +234,13 @@ class App(tk.Tk):
         self.current_combo = None
         self.match_log = []
         self.top_matches = {}
+        self._match_job = None      # фоновое сопоставление (after)
+        self._match_gen = 0
+        self._match_pos = 0         # сколько строк уже сопоставлено
+        self._match_total = 0
+        self._match_col_name = ""
+        self._filter_mode = "all"
+        self._tree_shown = 0
         self.last_click = {"item": None, "column": "#5"}
         self.undo_stack = []
         self._assign_counter = {}
@@ -681,52 +667,142 @@ class App(tk.Tk):
             if col_name not in self.df.columns:
                 messagebox.showerror("Ошибка", f"Столбец «{col_name}» не найден")
                 return
-            self.status.config(text="Сопоставляю (с учётом памяти и правил)…", foreground="blue")
-            self.update()
-
+            self._cancel_matching()
             self.matcher = self._make_matcher()
-            suggestions = []
-            confidences = []
+            n = len(self.df)
             self.match_log = []
             self.top_matches = {}
-            for i, name in enumerate(self.df[col_name]):
-                group, conf, dbg = self.matcher.find_best_group(name, return_debug=True, top_n=3)
-                suggestions.append(group)
-                confidences.append(conf)
-                self.top_matches[i] = dbg["top"]
-                top2 = dbg["top"][1] if len(dbg["top"]) > 1 else ("", 0.0)
-                top3 = dbg["top"][2] if len(dbg["top"]) > 2 else ("", 0.0)
-                self.match_log.append({
-                    "№": i + 1,
-                    "Название": name,
-                    "Очищенное_название": dbg["cleaned"],
-                    "Главное_слово": dbg["head_word"],
-                    "Предложенная_группа": group or "",
-                    "Уверенность": round(conf, 3),
-                    "Топ2_группа": top2[0],
-                    "Топ2_уверенность": round(top2[1], 3),
-                    "Топ3_группа": top3[0],
-                    "Топ3_уверенность": round(top3[1], 3),
-                    "Источник": dbg["source"] or "",
-                    "Правило": dbg.get("rule", ""),
-                    "Совпавшие_слова": ", ".join(dbg["matched_words"]),
-                    "База_IDF": dbg["base"],
-                    "Покрытие_группы": dbg["coverage"],
-                    "Бонус_главного_слова": dbg["head_bonus"],
-                    "Бонус_из_памяти": dbg["learned_bonus"],
-                    "Итоговый_score": dbg["score"],
-                    "Отрыв_от_второй": dbg.get("gap", 0.0),
-                    "Отдано_обобщённой_группе": dbg["generic_override"],
-                    "Уверенность_до_калибровки": dbg.get("confidence_raw", 0.0),
-                })
-            self.df["_suggested"] = suggestions
-            self.df["_confidence"] = confidences
-            self.df[self.col_group.get()] = suggestions
+            self._alt_full = {}
+            self.df["_suggested"] = pd.Series([None] * n, index=self.df.index, dtype=object)
+            self.df["_confidence"] = 0.0
+            self.df[self.col_group.get()] = pd.Series([None] * n, index=self.df.index, dtype=object)
+            self._match_col_name = col_name
+            self._match_total = n
+            self._match_pos = 0
+            self._filter_mode = "all"
+
+            # Первые строки считаем сразу, чтобы можно было начать работу;
+            # остальное досчитывается в фоне (окно при этом не зависает).
+            first = min(self.FIRST_BATCH, n)
+            self.status.config(text=f"Сопоставляю первые {first} строк…", foreground="blue")
+            self.update()
+            self._match_range(0, first)
+            self._match_pos = first
             self.fill_tree("all")
-            filled = sum(1 for s in suggestions if s)
-            self.status.config(text=f"Готово. Предложено: {filled} из {len(self.df)}. Исправления запоминаются.", foreground="green")
+            if first < n:
+                self._set_match_status()
+                self._match_job = self.after(10, self._match_chunk, self._match_gen)
+            else:
+                self._finish_matching()
         except Exception as e:
             messagebox.showerror("Ошибка", str(e))
+
+    # ---------- фоновое сопоставление ----------
+    FIRST_BATCH = 500      # строк, которые считаются сразу
+    CHUNK_SECONDS = 0.05   # сколько секунд работаем за один заход (потом отдаём управление окну)
+
+    def _cancel_matching(self):
+        self._match_gen += 1
+        if self._match_job is not None:
+            try:
+                self.after_cancel(self._match_job)
+            except Exception:
+                pass
+            self._match_job = None
+
+    def _matching_in_progress(self) -> bool:
+        return self.df is not None and self._match_pos < self._match_total
+
+    def _set_match_status(self):
+        self.status.config(
+            text=f"Сопоставлено {self._match_pos} из {self._match_total}… "
+                 f"Можно работать с готовыми строками, остальные подгружаются.",
+            foreground="blue",
+        )
+
+    def _match_range(self, start, end):
+        """Сопоставляет строки [start, end): пишет предложения в df, лог и топ-варианты."""
+        if end <= start:
+            return
+        col_group = self.col_group.get()
+        names = self.df[self._match_col_name].iloc[start:end]
+        sugg, confs = [], []
+        for off, name in enumerate(names):
+            i = start + off
+            group, conf, dbg = self.matcher.find_best_group(name, return_debug=True, top_n=3)
+            sugg.append(group)
+            confs.append(conf)
+            self.top_matches[i] = dbg["top"]
+            top2 = dbg["top"][1] if len(dbg["top"]) > 1 else ("", 0.0)
+            top3 = dbg["top"][2] if len(dbg["top"]) > 2 else ("", 0.0)
+            self.match_log.append({
+                "№": i + 1,
+                "Название": name,
+                "Очищенное_название": dbg["cleaned"],
+                "Главное_слово": dbg["head_word"],
+                "Предложенная_группа": group or "",
+                "Уверенность": round(conf, 3),
+                "Топ2_группа": top2[0],
+                "Топ2_уверенность": round(top2[1], 3),
+                "Топ3_группа": top3[0],
+                "Топ3_уверенность": round(top3[1], 3),
+                "Источник": dbg["source"] or "",
+                "Правило": dbg.get("rule", ""),
+                "Совпавшие_слова": ", ".join(dbg["matched_words"]),
+                "База_IDF": dbg["base"],
+                "Покрытие_группы": dbg["coverage"],
+                "Бонус_главного_слова": dbg["head_bonus"],
+                "Бонус_из_памяти": dbg["learned_bonus"],
+                "Итоговый_score": dbg["score"],
+                "Отрыв_от_второй": dbg.get("gap", 0.0),
+                "Отдано_обобщённой_группе": dbg["generic_override"],
+                "Уверенность_до_калибровки": dbg.get("confidence_raw", 0.0),
+            })
+        idx = self.df.index[start:end]
+        self.df.loc[idx, "_suggested"] = pd.Series(sugg, index=idx, dtype=object)
+        self.df.loc[idx, "_confidence"] = confs
+        # Группа, уже проставленная вручную (например, «всем с таким же названием»
+        # ещё до того, как строка досчиталась), не затирается предложением.
+        cur = self.df.loc[idx, col_group].tolist()
+        merged = [c if (isinstance(c, str) and c) else sg for c, sg in zip(cur, sugg)]
+        self.df.loc[idx, col_group] = pd.Series(merged, index=idx, dtype=object)
+
+    def _match_chunk(self, gen):
+        if gen != self._match_gen:
+            return
+        self._match_job = None
+        start = self._match_pos
+        pos = start
+        t0 = time.perf_counter()
+        try:
+            while pos < self._match_total and time.perf_counter() - t0 < self.CHUNK_SECONDS:
+                end = min(pos + 10, self._match_total)
+                self._match_range(pos, end)
+                pos = end
+            self._match_pos = pos
+            self._append_tree_rows(start, pos)
+        except Exception as e:
+            self._match_pos = self._match_total
+            messagebox.showerror("Ошибка при сопоставлении", str(e))
+            return
+        if pos < self._match_total:
+            self._set_match_status()
+            self._match_job = self.after(5, self._match_chunk, gen)
+        else:
+            self._finish_matching()
+
+    def _finish_matching(self):
+        filled = int(self.df["_suggested"].notna().sum()) if self.df is not None else 0
+        self.status.config(
+            text=f"Готово. Предложено: {filled} из {len(self.df)}. Исправления запоминаются.",
+            foreground="green")
+
+    def _append_tree_rows(self, start, end):
+        if end <= start:
+            return
+        sub = self.df.iloc[start:end]
+        for idx, row in sub.iterrows():
+            self._insert_tree_row(idx, row, self._filter_mode)
 
     def extract_article(self, name: str) -> str:
         """Резервный способ вытащить артикул из названия."""
@@ -790,33 +866,37 @@ class App(tk.Tk):
 
     def fill_tree(self, filter_mode="all"):
         self.tree.delete(*self.tree.get_children())
+        self._filter_mode = filter_mode
+        self._tree_shown = 0
         if self.df is None:
             return
+        # Показываем только уже сопоставленные строки (остальные дойдут в фоне).
+        for idx, row in self.df.iloc[:self._match_pos].iterrows():
+            self._insert_tree_row(idx, row, filter_mode)
 
+    def _insert_tree_row(self, idx, row, filter_mode):
         col_name = self.col_name.get().strip()
         col_group = self.col_group.get()
+        name = str(row[col_name])[:110]
+        suggested = row.get("_suggested") or ""
+        final = row.get(col_group) or ""
+        conf = row.get("_confidence", 0)
 
-        for idx, row in self.df.iterrows():
-            name = str(row[col_name])[:110]
-            suggested = row.get("_suggested") or ""
-            final = row.get(col_group) or ""
-            conf = row.get("_confidence", 0)
+        top = self.top_matches.get(idx, [])
+        alt_full = "  |  ".join(f"{g} ({c*100:.0f}%)" for g, c in top[1:3] if g)
+        self._alt_full[str(idx)] = alt_full
+        alt_text = " | ".join(
+            f"{self._short_alt_name(g)} {c*100:.0f}%" for g, c in top[1:3] if g)
 
-            top = self.top_matches.get(idx, [])
-            alt_full = "  |  ".join(f"{g} ({c*100:.0f}%)" for g, c in top[1:3] if g)
-            self._alt_full[str(idx)] = alt_full
-            alt_text = " | ".join(
-                f"{self._short_alt_name(g)} {c*100:.0f}%" for g, c in top[1:3] if g)
-
-            show = (filter_mode == "all" or
-                    (filter_mode == "suggested" and suggested) or
-                    (filter_mode == "empty" and not final) or
-                    (filter_mode == "low" and conf < 0.55))
-
-            if show:
-                stripe = "even" if len(self.tree.get_children()) % 2 == 0 else "odd"
-                self.tree.insert("", "end", iid=str(idx), tags=(stripe,),
-                                 values=(idx + 1, name, suggested, alt_text, final, "🔍 Google", "🔍 Remzona"))
+        show = (filter_mode == "all" or
+                (filter_mode == "suggested" and suggested) or
+                (filter_mode == "empty" and not final) or
+                (filter_mode == "low" and conf < 0.55))
+        if show:
+            stripe = "even" if self._tree_shown % 2 == 0 else "odd"
+            self._tree_shown += 1
+            self.tree.insert("", "end", iid=str(idx), tags=(stripe,),
+                             values=(idx + 1, name, suggested, alt_text, final, "🔍 Google", "🔍 Remzona"))
 
     # ====================== ВСПЛЫВАЮЩАЯ ПОДСКАЗКА ======================
     def _on_tree_motion(self, event):
@@ -1248,6 +1328,12 @@ class App(tk.Tk):
         if not path:
             messagebox.showwarning("Нет пути", "Укажите файл результата")
             return
+        if self._matching_in_progress():
+            if not messagebox.askyesno(
+                    "Сопоставление не закончено",
+                    f"Сопоставлено {self._match_pos} из {self._match_total} строк.\n"
+                    "У остальных строк группа пока пустая. Сохранить как есть?"):
+                return
         try:
             cols = [c for c in ["_suggested", "_confidence"] if c in self.df.columns]
             self.df.drop(columns=cols).to_excel(path, index=False)
@@ -1313,7 +1399,7 @@ class App(tk.Tk):
                 try:
                     log_df = pd.DataFrame(self.match_log)
                     if self.df is not None and self.col_group.get() in self.df.columns:
-                        log_df["Итоговая_группа_после_правок"] = self.df[self.col_group.get()].fillna("").values
+                        log_df["Итоговая_группа_после_правок"] = self.df[self.col_group.get()].fillna("").values[:len(log_df)]
                     log_df.to_excel(log_path, index=False)
                     saved_something = True
                 except Exception:
@@ -1335,6 +1421,12 @@ class App(tk.Tk):
         if not self.match_log:
             messagebox.showwarning("Нет данных", "Сначала выполните шаг 1 (Загрузить и сопоставить)")
             return
+        if self._matching_in_progress():
+            if not messagebox.askyesno(
+                    "Сопоставление не закончено",
+                    f"Сопоставлено {self._match_pos} из {self._match_total} строк, в лог попадут только они.\n"
+                    "Сохранить как есть?"):
+                return
         path = filedialog.asksaveasfilename(
             defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")], initialfile="match_log.xlsx",
         )
@@ -1343,7 +1435,7 @@ class App(tk.Tk):
         try:
             log_df = pd.DataFrame(self.match_log)
             if self.df is not None and self.col_group.get() in self.df.columns:
-                log_df["Итоговая_группа_после_правок"] = self.df[self.col_group.get()].fillna("").values
+                log_df["Итоговая_группа_после_правок"] = self.df[self.col_group.get()].fillna("").values[:len(log_df)]
             log_df.to_excel(path, index=False)
             messagebox.showinfo("Сохранено", f"Лог сопоставления сохранён:\n{path}\n\nМожно отправить этот файл для дальнейшей наладки алгоритма.")
             self.status.config(text=f"Лог сохранён → {Path(path).name}", foreground="green")

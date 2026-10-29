@@ -66,6 +66,8 @@ class SmartMatcher:
     MISS_PEN = 0.8         # штраф сходства, если в запросе есть значимое слово, которого нет ни в примере, ни в его группе
     HEAD_MISS = 0.7        # штраф сходства, если главное слово запроса не главное в примере
     EXACT_BONUS = 8.0      # запрос = название группы (без модификаторов)
+    EXACT_FULL_BONUS = 12.0 # запрос совпадает с названием группы ПОЛНОСТЬЮ, включая модификаторы (передняя/центральная…)
+    PREFIX_BONUS = 8.0     # запрос НАЧИНАЕТСЯ с полного названия группы (>=2 слов) — часто результат синонимных правил
     FULLCOVER_BONUS = 2.0  # название группы (>=2 слов) целиком содержится в запросе
     CONFIDENCE_SCALE = 14.0
     LEARNED_WEIGHT = 1.5
@@ -100,6 +102,7 @@ class SmartMatcher:
 
         self.group_stems = {g: self._extract_stems(self._clean(g), keep_latin=True) for g in groups}
         self._compute_idf()
+        self._group_seq = {g: tuple(self._extract_stems_list(self._clean(g), keep_latin=True)) for g in groups}
         self._group_head = {}
         for g_, st_ in self.group_stems.items():
             lst_ = self._extract_stems_list(self._clean(g_), keep_latin=True)
@@ -173,8 +176,13 @@ class SmartMatcher:
             comp = [(re.compile(pat), rep) for pat, rep in self.ABBREV]
             self._abbrev_c = comp
             self._abbrev_src = self.ABBREV
+        hits = 0
         for rx, repl in comp:
-            s = rx.sub(repl, s)
+            s2 = rx.sub(repl, s)
+            if s2 != s:
+                hits += 1
+                s = s2
+        self._last_hits = hits
         # типоразмер шины (175/65 R14, 205/55/16): главное слово — «шины»
         if self.TIRE_SIZE_RE.search(s) and not re.search(r'\bшин', s):
             s = 'шины ' + s
@@ -431,6 +439,7 @@ class SmartMatcher:
         (группа, уверенность, debug_dict). debug["source"]: history / rule /
         scoring / none; debug["top"] — до top_n лучших (группа, уверенность)."""
         cleaned = self._clean(part_name)
+        rewritten = getattr(self, '_last_hits', 0) > 0
         debug = {
             "cleaned": cleaned, "source": None, "matched_words": [], "head_word": "",
             "base": 0.0, "coverage": 0.0, "head_bonus": 0.0, "learned_bonus": 0.0, "score": 0.0,
@@ -520,8 +529,13 @@ class SmartMatcher:
             q_core = {w for w in stems if w not in self.MODIFIERS}
             if g_core and g_core == q_core:
                 score += self.EXACT_BONUS
+                if stems == group_stems:
+                    score += self.EXACT_FULL_BONUS
             elif coverage >= 1.0 and len(g_core) >= 2:
                 score += self.FULLCOVER_BONUS
+            gseq = self._group_seq.get(group, ())
+            if self.PREFIX_BONUS and rewritten and len(gseq) >= 2 and tuple(stems_list[:len(gseq)]) == gseq:
+                score += self.PREFIX_BONUS
             candidates.append((score, group, common, base, coverage, head_bonus, learned_bonus))
         if self.HEAD_PRIOR_W and hp_tot >= self.HEAD_PRIOR_MIN:
             seen_h = {c[1] for c in candidates}

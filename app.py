@@ -29,48 +29,70 @@ def _set_windows_app_user_model_id():
 class App(tk.Tk):
     HELP_TEXT = (
         "РАБОТА С ТАБЛИЦЕЙ\n\n"
-        "• Двойной клик по «Альтернативы» — быстрый выбор одной из топ-3 предложенных групп кнопками.\n"
-        "• Двойной клик по «Итоговая группа» — полный поиск по всем группам (набирайте название, "
-        "стрелками/Enter выбирайте вариант).\n"
-        "• Наведите курсор на любую ячейку и подождите — появится всплывающая подсказка с полным "
-        "текстом, если значение не помещается в столбец.\n\n"
+        "• Двойной клик по «Альтернативы» — быстрый выбор одной из топ-3 групп кнопками (первая — самая вероятная; в самой ячейке показаны только 2-я и 3-я) "
+        "(или «Другой вариант…» для поиска по всем группам). Esc закрывает окно.\n"
+        "• Двойной клик по «Итоговая группа» — полный поиск по всем группам (набирайте часть "
+        "названия, стрелкой вниз и Enter выбирайте вариант). Esc закрывает окно.\n"
+        "• В столбце «Альтернативы» длинные названия сокращены, чтобы были видны все три варианта. "
+        "Наведите курсор на ячейку и подождите — появится подсказка с полным текстом.\n"
+        "• Клик по «Google» — поиск по бренду и артикулу, клик по «Remzona» — поиск названия на Remzona.\n"
+        "• Столбцы всегда помещаются в окно: если потянуть границу столбца, остальные сжимаются, "
+        "а не уезжают за экран.\n\n"
+        "ФИЛЬТРЫ\n\n"
+        "• «Показать все», «Только с предложением», «Только без группы», «Низкая уверенность» "
+        "(уверенность ниже 0,55 — такие подсказки проверяйте в первую очередь).\n\n"
         "ВЫДЕЛЕНИЕ НЕСКОЛЬКИХ СТРОК\n\n"
         "• Ctrl+клик / Shift+клик — выделить несколько строк.\n"
         "• Ctrl+A — выделить все видимые строки.\n"
         "• ПКМ по выделенным строкам → «Назначить группу выделенным строкам…» — один выбор группы "
         "сразу для всех.\n"
         "• Ctrl+D (или ПКМ → «Протянуть группу вниз») — скопировать группу из первой выделенной "
-        "строки на остальные выделенные, как протягивание уголка ячейки в Excel.\n"
+        "строки на остальные выделенные, как протягивание уголка ячейки в Excel. Протянутые строки "
+        "запоминаются, поэтому протягивайте только проверенные.\n"
         "• ПКМ → «Назначить эту группу всем строкам с таким же названием» — группа из первой "
         "выделенной строки проставляется ВСЕМ строкам таблицы с тем же очищенным названием "
         "(например, 25 одинаковых «Сальник!»), в том числе скрытым фильтром.\n\n"
         "ПРАВИЛА\n\n"
         "• Настройки → вкладка «Правила»: «фраза → группа» (или регулярка → группа). Правило "
-        "срабатывает до скоринга и даёт 100% уверенность. Порядок решения: точное совпадение из "
-        "памяти → правила сверху вниз → скоринг.\n"
+        "срабатывает раньше подбора и даёт 100% уверенность. Порядок решения: точное совпадение "
+        "из памяти → правила сверху вниз → подбор по смыслу.\n"
+        "• Точная запись в памяти сильнее правила: чтобы поправить её, назначьте верную группу заново.\n"
         "• ПКМ → «Создать правило из строки…» — быстро сделать правило из названия и итоговой "
         "группы выделенной строки (фразу можно отредактировать, например укоротить).\n"
-        "• В логе сопоставления столбец «Источник» показывает history / rule / scoring / none.\n\n"
+        "• Не делайте слишком общих правил (например, «ремкомплект»): они сработают на всё подряд. "
+        "Проверяйте правило кнопкой «Проверить название».\n\n"
         "УВЕРЕННОСТЬ\n\n"
-        "Для скоринга уверенность калибруется по отрыву лучшей группы от второй: если конкуренты "
-        "почти равны, уверенность занижается, и строка попадает в фильтр «Низкая уверенность». "
-        "100% выдаётся только для истории и правил.\n\n"
+        "• 100% выдаётся только для памяти и правил.\n"
+        "• Для остальных строк уверенность показывает надёжность подсказки: от 0,95 можно принимать "
+        "после беглого взгляда, 0,85–0,95 — просматривать, ниже 0,85 — проверять, ниже 0,55 — решать "
+        "самостоятельно. Если две группы почти равны, уверенность занижается.\n\n"
         "ГОРЯЧИЕ КЛАВИШИ (работают в любой раскладке — EN и RU)\n\n"
         "• Ctrl+C — копировать содержимое ячейки (той колонки, по которой был последний клик).\n"
         "• Ctrl+V / Ctrl+X — вставить / вырезать текст в полях ввода.\n"
         "• Ctrl+A — выделить всё (в полях ввода — весь текст, в таблице — все строки).\n"
-        "• Ctrl+Z — отменить последнее назначение группы (для памяти матчера отмена не действует — "
-        "уже выученные слова придётся переучить, назначив группу заново).\n\n"
-        "ОБУЧЕНИЕ\n\n"
-        "Каждое ручное назначение группы запоминается: и точная фраза, и отдельные слова вместе с "
-        "группой, к которой их отнесли. Со временем подсказки становятся точнее без изменения кода."
+        "• Ctrl+Backspace / Ctrl+Delete — удалить слово целиком назад / вперёд в полях ввода.\n"
+        "• Ctrl+D — протянуть группу вниз.\n"
+        "• Esc — закрыть окно выбора группы.\n"
+        "• Ctrl+Z — отменить последнее назначение группы (память при этом не откатывается: "
+        "если назначили не ту группу, назначьте правильную заново).\n\n"
+        "ОБУЧЕНИЕ И ЛОГ\n\n"
+        "• Каждое ручное назначение группы запоминается: и точная фраза, и отдельные слова вместе с "
+        "группой, к которой их отнесли. Непроверенные предложения в память не попадают.\n"
+        "• Кнопка «3. Сохранить лог сопоставления» — подробный лог с предложением, уверенностью, "
+        "альтернативами, источником решения (history / rule / scoring / none) и вашей итоговой группой. "
+        "Сохраняйте его после ручной проверки: по расхождениям видно, где алгоритм ошибся, и по нему "
+        "можно донастроить подбор.\n"
+        "• Настройки → «Обучить по файлу исправлений…» — загрузить лог или Excel «Название — Группа». "
+        "Для лога лучше отвечать «Да»: запомнятся только исправленные строки.\n"
+        "• Автосохранение копирует лог и память в папку remzona_groups_logs (до 10 файлов каждого вида). "
+        "Предыдущая версия памяти хранится в matching_memory.json.bak.\n"
     )
 
     # Ctrl+буква определяется по event.keycode (виртуальный код физической клавиши на
     # Windows), поэтому работает одинаково в EN и RU раскладках.
-    # Максимальная длина названия группы в столбце «Альтернативы» (длиннее — «…»).
+    # Максимальная длина названия группы в столбце «Предложения» (длиннее — «…»).
     # Полный текст виден во всплывающей подсказке и при копировании ячейки.
-    ALT_NAME_MAX = 14
+    ALT_NAME_MAX = 34
 
     CTRL_VK_CODES = {"c": 67, "v": 86, "x": 88, "z": 90, "d": 68, "a": 65,
                      "backspace": 8, "delete": 46}
@@ -231,7 +253,6 @@ class App(tk.Tk):
         self.df = None
         self.groups = []
         self.matcher = None
-        self.current_combo = None
         self.match_log = []
         self.top_matches = {}
         self._match_job = None      # фоновое сопоставление (after)
@@ -241,7 +262,7 @@ class App(tk.Tk):
         self._match_col_name = ""
         self._filter_mode = "all"
         self._tree_shown = 0
-        self.last_click = {"item": None, "column": "#5"}
+        self.last_click = {"item": None, "column": "#4"}
         self.undo_stack = []
         self._assign_counter = {}
         self._alt_full = {}
@@ -424,7 +445,10 @@ class App(tk.Tk):
         frm_table.pack(fill="both", expand=True, padx=8, pady=6)
 
         columns = ("idx", "name", "suggested", "alt", "final", "google", "remzona")
+        # Столбец «suggested» остаётся в данных (по нему работают фильтры и копирование),
+        # но не показывается: лучшая группа и так подставлена в «Итоговую группу».
         self.tree = ttk.Treeview(frm_table, columns=columns, show="headings",
+                                  displaycolumns=("idx", "name", "alt", "final", "google", "remzona"),
                                   selectmode="extended", style="Bordered.Treeview")
         self.tree.tag_configure("even", background=self._row_stripe_colors[0])
         self.tree.tag_configure("odd", background=self._row_stripe_colors[1])
@@ -432,19 +456,18 @@ class App(tk.Tk):
         self.tree.heading("idx", text="№")
         self.tree.heading("name", text="Название запчасти")
         self.tree.heading("suggested", text="Предложение")
-        self.tree.heading("alt", text="Альтернативы (топ-3)")
+        self.tree.heading("alt", text="Альтернативы (топ-2, топ-3) — двойной клик: все варианты")
         self.tree.heading("final", text="Итоговая группа")
         self.tree.heading("google", text="Google")
         self.tree.heading("remzona", text="Remzona")
 
         # Все столбцы масштабируются вместе с окном: свободная ширина делится пропорционально
-        # "base" (поэтому главные столбцы — название, предложение, альтернативы — шире всех,
+        # "base" (поэтому главные столбцы — название, предложения, итоговая группа — шире всех,
         # а №, Google и Remzona минимальные), но не меньше "min".
         self._column_specs = (
             {"id": "idx", "base": 30, "min": 20, "anchor": "center"},
             {"id": "name", "base": 340, "min": 80, "anchor": "w"},
-            {"id": "suggested", "base": 230, "min": 60, "anchor": "w"},
-            {"id": "alt", "base": 340, "min": 70, "anchor": "w"},
+            {"id": "alt", "base": 600, "min": 120, "anchor": "w"},
             {"id": "final", "base": 230, "min": 50, "anchor": "w"},
             {"id": "google", "base": 30, "min": 20, "anchor": "center"},
             {"id": "remzona", "base": 30, "min": 20, "anchor": "center"},
@@ -454,6 +477,7 @@ class App(tk.Tk):
                 spec["id"], width=spec["base"], minwidth=spec["min"],
                 anchor=spec["anchor"], stretch=False,
             )
+        self.tree.column("suggested", width=0, minwidth=0, stretch=False)
 
         vsb = ttk.Scrollbar(frm_table, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -845,7 +869,7 @@ class App(tk.Tk):
         brand = self.get_col_value(idx, self.col_brand)
         article = self.get_col_value(idx, self.col_article)
 
-        if column == "#6":
+        if column == "#5":
             if brand and article:
                 query = f"{brand} {article}"
             elif article:
@@ -856,7 +880,7 @@ class App(tk.Tk):
                 query = self.extract_article(full_name) or full_name[:80]
             webbrowser.open(f"https://www.google.com/search?q={quote(query)}")
 
-        elif column == "#7":
+        elif column == "#6":
             webbrowser.open(f"https://www.google.com/search?q={quote('remzona ' + full_name)}")
 
     def _short_alt_name(self, group: str) -> str:
@@ -883,10 +907,13 @@ class App(tk.Tk):
         conf = row.get("_confidence", 0)
 
         top = self.top_matches.get(idx, [])
-        alt_full = "  |  ".join(f"{g} ({c*100:.0f}%)" for g, c in top[1:3] if g)
+        # Лучшая группа уже стоит в «Итоговой группе», поэтому в ячейке — только топ-2 и топ-3.
+        # Все три (с первой) видны при двойном клике по ячейке.
+        shown = [(g, c) for g, c in top[1:3] if g]
+        alt_full = "  |  ".join(f"{n}. {g} ({c*100:.0f}%)" for n, (g, c) in enumerate(shown, 2))
         self._alt_full[str(idx)] = alt_full
-        alt_text = " | ".join(
-            f"{self._short_alt_name(g)} {c*100:.0f}%" for g, c in top[1:3] if g)
+        alt_text = "  │  ".join(
+            f"{n}. {self._short_alt_name(g)} {c*100:.0f}%" for n, (g, c) in enumerate(shown, 2))
 
         show = (filter_mode == "all" or
                 (filter_mode == "suggested" and suggested) or
@@ -963,9 +990,9 @@ class App(tk.Tk):
         column = self.tree.identify_column(event.x)
         if not item:
             return
-        if column == "#5":
+        if column == "#4":
             self.open_search_popup([item])
-        elif column == "#4":
+        elif column == "#3":
             idx = int(item)
             top = self.top_matches.get(idx, [])
             if not top:
@@ -1178,7 +1205,7 @@ class App(tk.Tk):
         found = self._first_selected_with_group()
         if not found:
             return
-        item, name, group = found
+        _item, name, group = found
         matcher = self._ensure_matcher()
         key = matcher._clean(name)
         if not key:
@@ -1208,7 +1235,7 @@ class App(tk.Tk):
         found = self._first_selected_with_group()
         if not found:
             return
-        item, name, group = found
+        _item, name, group = found
         matcher = self._ensure_matcher()
         default_phrase = matcher._clean(name)
         phrase = simpledialog.askstring(
@@ -1275,12 +1302,10 @@ class App(tk.Tk):
         elif column == "#2":
             return str(self.df.at[idx, col_name])
         elif column == "#3":
-            return self.tree.set(item, "suggested")
-        elif column == "#4":
             return self._alt_full.get(str(item)) or self.tree.set(item, "alt")
-        elif column == "#5":
+        elif column == "#4":
             return self.tree.set(item, "final")
-        elif column in ("#6", "#7"):
+        elif column in ("#5", "#6"):
             return str(self.df.at[idx, col_name])
         return ""
 
@@ -1288,7 +1313,7 @@ class App(tk.Tk):
         sel = self.tree.selection()
         if not sel:
             return
-        column = self.last_click.get("column") or "#5"
+        column = self.last_click.get("column") or "#4"
         values = [self.get_cell_text(item, column) for item in sel]
         values = [v for v in values if v]
         if not values:
@@ -1441,112 +1466,3 @@ class App(tk.Tk):
             self.status.config(text=f"Лог сохранён → {Path(path).name}", foreground="green")
         except Exception as e:
             messagebox.showerror("Ошибка", str(e))
-
-    def import_corrections(self):
-        """Обучает память на Excel-файле с парами «Название — Группа»
-        (например, на сохранённом логе с заполненным столбцом «Итоговая_группа_после_правок»)."""
-        if not self.groups:
-            self.load_groups_from_file(self.groups_file.get())
-            if not self.groups:
-                messagebox.showwarning("Нет групп", "Сначала укажите и загрузите файл групп")
-                return
-
-        path = filedialog.askopenfilename(
-            title="Файл с исправлениями (лог или результат)",
-            filetypes=[("Excel", "*.xlsx *.xls")],
-        )
-        if not path:
-            return
-
-        try:
-            corr_df = pd.read_excel(path)
-        except Exception as e:
-            messagebox.showerror("Ошибка", str(e))
-            return
-
-        # Файл аудита памяти (audit_memory.py): «Название (очищенное)» + «Верная_группа».
-        name_col_candidates = [self.col_name.get(), "Название", "Название запчасти",
-                               "Название (очищенное)"]
-        group_col_candidates = [
-            "Верная_группа", "Итоговая_группа_после_правок", self.col_group.get(), "Группа",
-            "Итоговая группа",
-        ]
-        name_col = next((c for c in name_col_candidates if c in corr_df.columns), None)
-        group_col = next((c for c in group_col_candidates if c in corr_df.columns), None)
-
-        if not name_col or not group_col:
-            messagebox.showerror(
-                "Не найдены столбцы",
-                "Не удалось найти нужные столбцы в файле.\n"
-                f"Ожидались столбец названия ({', '.join(name_col_candidates)}) "
-                f"и столбец группы ({', '.join(group_col_candidates)}).\n\n"
-                f"В файле есть: {', '.join(map(str, corr_df.columns))}"
-            )
-            return
-
-        matcher = self._ensure_matcher()
-
-        # В логе итоговая группа у НЕисправленных строк просто равна предложенной программой.
-        # Если такие строки запомнить, то ошибочные предложения превращаются в «подтверждённые»
-        # и портят последующие подсказки. Поэтому по умолчанию учим только исправленные строки
-        # (и строки, которые программа не смогла определить).
-        skip_unchanged = False
-        proposed_col = "Предложенная_группа" if "Предложенная_группа" in corr_df.columns else None
-        if proposed_col and group_col == "Итоговая_группа_после_правок":
-            answer = messagebox.askyesnocancel(
-                "Какие строки запоминать?",
-                "В файле есть и предложенная программой группа, и итоговая.\n\n"
-                "Да — запомнить только строки, которые вы ИСПРАВИЛИ (рекомендуется: "
-                "непроверенные предложения не попадут в память).\n"
-                "Нет — запомнить все строки, включая принятые без правок.\n"
-                "Отмена — ничего не делать."
-            )
-            if answer is None:
-                return
-            skip_unchanged = bool(answer)
-
-        # Для файла аудита: группа вписана вручную, опечатка попала бы в память как «истина»,
-        # поэтому принимаем только группы из загруженного списка (без учёта регистра/пробелов).
-        audit_mode = group_col == "Верная_группа"
-        known_groups = {re.sub(r"\s+", " ", g).strip().lower(): g for g in self.groups}
-        unknown = []
-
-        learned_count = 0
-        skipped_count = 0
-        for _, row in corr_df.iterrows():
-            name = row.get(name_col)
-            group = row.get(group_col)
-            if not isinstance(name, str) or not name.strip():
-                continue
-            if not isinstance(group, str) or not group.strip():
-                continue
-            if skip_unchanged:
-                proposed = row.get(proposed_col)
-                if isinstance(proposed, str) and proposed.strip() == group.strip():
-                    skipped_count += 1
-                    continue
-            group = group.strip()
-            if audit_mode:
-                canonical = known_groups.get(re.sub(r"\s+", " ", group).lower())
-                if canonical is None:
-                    unknown.append(group)
-                    continue
-                group = canonical
-            matcher.remember(name, group)
-            learned_count += 1
-
-        unknown_note = ""
-        if unknown:
-            uniq = sorted(set(unknown))
-            unknown_note = (f"\nНе найдено в списке групп (строки пропущены, {len(unknown)} шт.): "
-                            + ", ".join(uniq[:5]) + (" …" if len(uniq) > 5 else "") + "\n")
-
-        messagebox.showinfo(
-            "Готово",
-            f"Обучено на {learned_count} исправлениях из файла:\n{Path(path).name}\n"
-            f"Пропущено непроверенных строк: {skipped_count}\n{unknown_note}\n"
-            f"Память сохранена в {matcher.memory_file} — теперь эти соответствия "
-            f"будут узнаваться сразу (со 100% уверенностью), а похожие слова "
-            f"будут сильнее тянуть к тем же группам."
-        )
-        self.status.config(text=f"Память обучена: +{learned_count} исправлений из файла", foreground="green")
